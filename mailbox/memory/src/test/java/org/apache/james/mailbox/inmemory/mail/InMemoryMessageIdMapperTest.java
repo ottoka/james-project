@@ -19,6 +19,7 @@
 
 package org.apache.james.mailbox.inmemory.mail;
 
+import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.store.mail.model.MapperProvider;
 import org.apache.james.mailbox.store.mail.model.MessageIdMapperTest;
 
@@ -27,5 +28,12 @@ class InMemoryMessageIdMapperTest extends MessageIdMapperTest {
     @Override
     protected MapperProvider provideMapper() {
         return new InMemoryMapperProvider();
+    }
+
+    @Override
+    protected void saveMessages() throws MailboxException {
+        super.saveMessages();
+        // fast-forward UID generator to avoid possible conflicts from different UID sources
+        mapperProvider.generateMessageUid();
     }
 }

@@ -19,6 +19,7 @@
 
 package org.apache.james.mailbox.inmemory.mail;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -26,15 +27,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import javax.mail.Flags;
 import javax.mail.Flags.Flag;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.inmemory.InMemoryId;
+import org.apache.james.mailbox.model.ByteContent;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageMetaData;
@@ -115,16 +119,39 @@ public class InMemoryMessageMapper extends AbstractMessageMapper {
 
     @Override
     public Iterator<MailboxMessage> findInMailbox(Mailbox mailbox, MessageRange set, FetchType ftype, int max) {
-        List<MailboxMessage> results = new ArrayList<>(getMembershipByUidForMailbox(mailbox).values());
-        results.removeIf(mailboxMessage -> !set.includes(mailboxMessage.getUid()));
-        
-        Collections.sort(results);
+        List<MailboxMessage> results = getMembershipByUidForMailbox(mailbox).values().stream()
+            .filter(mailboxMessage -> set.includes(mailboxMessage.getUid()))
+            .map(message -> toMessageView(message, ftype))
+            .sorted()
+            .collect(Collectors.toList());
 
         if (max > 0 && results.size() > max) {
             results = results.subList(0, max);
         }
         return results.iterator();
     }
+    
+    private static MailboxMessage toMessageView(MailboxMessage original, FetchType ftype) {
+        try {
+            switch (ftype) {
+                case METADATA:
+                    return SimpleMailboxMessage.fromWithoutContent(original)
+                        .content(new ByteContent(new byte[0]))
+                        .build();
+                case HEADERS:
+                    return SimpleMailboxMessage.fromWithoutContent(original)
+                        .content(new ByteContent(IOUtils.toByteArray(original.getHeaderContent())))
+                        .build();
+                case BODY:
+                case FULL:
+                default:
+                    return original;
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to retrieve message content", e);
+        }
+    }
+
 
     @Override
     public List<MessageUid> findRecentMessageUidsInMailbox(Mailbox mailbox) {
@@ -197,10 +224,15 @@ public class InMemoryMessageMapper extends AbstractMessageMapper {
 
     @Override
     public MessageMetaData save(Mailbox mailbox, MailboxMessage message) throws MailboxException {
-        SimpleMailboxMessage copy = SimpleMailboxMessage.copy(mailbox.getMailboxId(), message);
-        copy.setUid(message.getUid());
-        copy.setModSeq(message.getModSeq());
-        getMembershipByUidForMailbox(mailbox).put(message.getUid(), copy);
+        // try to update exiting message, since passed message may be metadata/header only without body content
+        MailboxMessage storeMessage = getMembershipByUidForMailbox(mailbox).get(message.getUid());
+        if (storeMessage == null) {
+            storeMessage = SimpleMailboxMessage.copy(mailbox.getMailboxId(), message);
+            storeMessage.setUid(message.getUid());
+        }
+        storeMessage.setModSeq(message.getModSeq());
+        storeMessage.setFlags(message.createFlags());
+        getMembershipByUidForMailbox(mailbox).put(message.getUid(), storeMessage);
 
         return message.metaData();
     }

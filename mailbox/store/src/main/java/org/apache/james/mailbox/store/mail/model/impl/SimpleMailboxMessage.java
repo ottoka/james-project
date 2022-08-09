@@ -167,6 +167,21 @@ public class SimpleMailboxMessage extends DelegatingMailboxMessage {
         return from(original).mailboxId(mailboxId).build();
     }
 
+    public static Builder fromWithoutContent(MailboxMessage original) {
+        return builder()
+            .messageId(original.getMessageId())
+            .threadId(original.getThreadId())
+            .bodyStartOctet(Ints.checkedCast(original.getFullContentOctets() - original.getBodyOctets()))
+            .internalDate(original.getInternalDate())
+            .size(original.getFullContentOctets())
+            .flags(original.createFlags())
+            .properties(original.getProperties())
+            .mailboxId(original.getMailboxId())
+            .uid(original.getUid())
+            .modseq(original.getModSeq())
+            .addAttachments(original.getAttachments());
+    }
+
     public static Builder fromWithoutAttachments(MailboxMessage original) throws MailboxException {
         return builder()
             .threadId(original.getThreadId())
